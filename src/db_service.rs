@@ -58,33 +58,20 @@ impl DbService {
     }
 
     // Update a user by their ID
-// Update function to modify user fields by ID
-pub async fn update_by_id(&self, user_id: String, user_data: Map<String, Value>) -> Result<(), MyError> {
-    // Prepare a HashMap for the updates
-    let mut updates = HashMap::new();
-
-    // Iterate through the provided user_data and add to updates, excluding 'id'
-    for (key, value) in user_data {
-        
-            updates.insert(key, value);
-        
+    pub async fn update_by_id(&self, user_id: String, user_data: Map<String, Value>) -> Result<(), MyError> {
+        self.client
+            .fluent()
+            .update()
+            .fields(&user_data.keys().cloned().collect::<Vec<String>>()) // Pass the valid field names
+            .in_col("Users") // Specify the collection
+            .document_id(&user_id) // Use the Firestore document ID of the found document
+            .object(&user_data) // Pass the updates object
+            .execute::<User>() // Specify that we're updating a `User`
+            .await
+            .map_err(MyError::FirestoreError)?; // Map FirestoreError to MyError
+    
+        Ok(())
     }
-
-
-    self.client
-        .fluent()
-        .update()
-        .fields(&updates.keys().cloned().collect::<Vec<String>>()) // Pass the valid field names
-        .in_col("Users") // Specify the collection
-        .document_id(&user_id) // Use the Firestore document ID of the found document
-        .object(&updates) // Pass the updates object
-        .execute::<User>() // Specify that we're updating a `User`
-        .await
-        .map_err(MyError::FirestoreError)?; // Map FirestoreError to MyError
-
-
-    Ok(())
-}
 
     // Delete a user by ID
     pub async fn delete_by_id(&self, id: String) -> Result<(), FirestoreError> {
@@ -98,5 +85,22 @@ pub async fn update_by_id(&self, user_id: String, user_data: Map<String, Value>)
 
         Ok(())
     }
+
+    pub async fn check_user_exists(&self, user_id: String) -> Result<bool, MyError> {
+        let documents: Vec<User> = self.client
+            .fluent()
+            .select()
+            .from("Users")
+            .filter(|filter| filter.field("id").equal(&user_id)) // Use the correct method for filtering
+            .obj()
+            .query()
+            .await
+            .map_err(MyError::FirestoreError)?;
+    
+        // Return true if any user is found, false otherwise
+        Ok(!documents.is_empty())
+    }
+
 }
+
 

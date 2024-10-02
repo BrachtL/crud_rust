@@ -4,12 +4,17 @@ use crate::{db_service::MyError, model::User};
 use crate::db_service::DbService;
 use log::info;
 use serde_json::{json, Map, Value};
+use warp::reject::Reject;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 use warp::{reject, Filter, Rejection, Reply};
 
 #[derive(Debug)]
 struct MissingIdError;
+
+#[derive(Debug)]
+struct UserNotFoundError;
+impl Reject for UserNotFoundError {}
 
 impl reject::Reject for MissingIdError {}
 
@@ -46,55 +51,51 @@ pub async fn handle_insert_user(
 pub async fn handle_update_user(
     updates: Value,
     db_service: Arc<Mutex<DbService>>,
-) -> Result<impl Reply, Rejection> {
+) -> Result<impl warp::Reply, Rejection> {
     let db_service = db_service.lock().await;
 
     // Extract the user ID from the updates Value
-    let user_id = updates.get("id").and_then(Value::as_str).ok_or_else(|| {
-        reject::custom(MissingIdError) // Use custom rejection if ID is missing
-    })?;
+    let user_id = updates
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| warp::reject::custom(MissingIdError))?;
 
     info!("user_id -> {}", user_id);
 
-    // Create a HashMap to hold the fields to be updated
-    let mut update_fields = HashMap::new();
+    // Check if the user exists in the database
+    let user_exists = match db_service.check_user_exists(user_id.to_string()).await {
+        Ok(exists) => exists,
+        Err(_) => return Err(warp::reject::custom(UserNotFoundError)),
+    };
 
-    // Iterate over the updates to filter out null values and collect valid fields
-    for (key, value) in updates.as_object().unwrap_or(&Default::default()) {
-        if !value.is_null() {
-            update_fields.insert(key.clone(), value.clone());
-        }
+    if !user_exists {
+        return Err(warp::reject::custom(UserNotFoundError)); // Return custom error if the user is not found
     }
 
-    info!("update_fields -> {:?}", update_fields);
+    // Convert updates Value to Map<String, Value> before passing to update_by_id
+    let update_map: Map<String, Value> = updates
+        .as_object()
+        .unwrap_or(&Default::default()) // Ensure we have an object
+        .iter()
+        .filter_map(|(key, value)| {
+            if !value.is_null() {
+                Some((key.clone(), value.clone())) // Only add non-null fields
+            } else {
+                None
+            }
+        })
+        .collect();
 
-    // Convert HashMap to serde_json::Map<String, Value>
-    let update_map: Map<String, Value> = update_fields.into_iter().collect();
+    info!("update_fields -> {:?}", update_map);
 
-    // Perform the update directly with the filtered fields
-    match db_service.update_by_id(user_id.to_string(), update_map).await {
-        Ok(_) => Ok(warp::reply::json(&json!( {
+    // Perform the update if the user exists
+    let update_result = db_service.update_by_id(user_id.to_string(), update_map).await;
+    
+    match update_result {
+        Ok(_) => Ok(warp::reply::json(&json!({
             "status": "User updated successfully"
         }))),
-        Err(err) => {
-            let error_response = match err {
-                MyError::FirestoreError(firestore_err) => {
-                    let error_message = firestore_err.to_string();
-                    json!({
-                        "status": "Error updating user",
-                        "error": error_message
-                    })
-                },
-                MyError::UserNotFound(msg) => {
-                    json!({
-                        "status": "User not found",
-                        "error": msg
-                    })
-                },
-            };
-    
-            Ok(warp::reply::json(&error_response))
-        }
+        Err(_) => Err(warp::reject::custom(UserNotFoundError)), // Handle errors during the update
     }
 }
 

@@ -29,6 +29,7 @@ use warp::Filter;
 
 #[tokio::main]
 async fn main() {
+    env_logger::init();
     // Initialize the Firestore client
     let db_service = Arc::new(Mutex::new(DbService::new().await.unwrap()));
 
@@ -53,14 +54,24 @@ fn with_db_service(
     warp::any().map(move || db_service.clone())
 }
 
-// Handler for inserting a user
+// Handler for inserting a user and returning the generated ID to the client
 async fn handle_insert_user(
     user: User,
     db_service: Arc<Mutex<DbService>>,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let db_service = db_service.lock().await;
+
     match db_service.insert(user).await {
-        Ok(_) => Ok(warp::reply::json(&json!({"status": "User inserted successfully"}))),
-        Err(e) => Ok(warp::reply::json(&json!({"status": "Error inserting user", "error": e.to_string()}))),
+        Ok(generated_id) => {
+            // Send the generated ID back to the client
+            Ok(warp::reply::json(&json!({
+                "status": "User inserted successfully",
+                "id": generated_id // Include the generated ID in the response
+            })))
+        }
+        Err(e) => Ok(warp::reply::json(&json!({
+            "status": "Error inserting user",
+            "error": e.to_string()
+        }))),
     }
 }

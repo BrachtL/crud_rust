@@ -1,6 +1,16 @@
+use std::collections::HashMap;
+
 use firestore::{FirestoreDb, FirestoreDbOptions, errors::FirestoreError};
+use log::info;
+use serde_json::{Map, Value};
 use crate::model::User;
 use uuid::Uuid; // To generate a temporary UUID for the user
+
+#[derive(Debug)]
+pub enum MyError {
+    FirestoreError(FirestoreError),
+    UserNotFound(String),
+}
 
 pub struct DbService {
     client: FirestoreDb,
@@ -36,7 +46,7 @@ impl DbService {
             .fluent()
             .insert()
             .into("Users")
-            .generate_document_id() // Let Firestore generate the ID
+            .document_id(&user.id) // Let Firestore generate the ID
             .object(&user) // Pass the user object to Firestore
             .execute::<User>() // Specify that we're inserting a `User`
             .await?;
@@ -48,19 +58,33 @@ impl DbService {
     }
 
     // Update a user by their ID
-    pub async fn update_by_id(&self, user: User) -> Result<(), FirestoreError> {
-        self.client
-            .fluent()
-            .update()
-            .fields(["first_name"])
-            .in_col("Users")
-            .document_id(&user.id) // The ID is now mandatory
-            .object(&user)
-            .execute::<User>()
-            .await?;
+// Update function to modify user fields by ID
+pub async fn update_by_id(&self, user_id: String, user_data: Map<String, Value>) -> Result<(), MyError> {
+    // Prepare a HashMap for the updates
+    let mut updates = HashMap::new();
 
-        Ok(())
+    // Iterate through the provided user_data and add to updates, excluding 'id'
+    for (key, value) in user_data {
+        
+            updates.insert(key, value);
+        
     }
+
+
+    self.client
+        .fluent()
+        .update()
+        .fields(&updates.keys().cloned().collect::<Vec<String>>()) // Pass the valid field names
+        .in_col("Users") // Specify the collection
+        .document_id(&user_id) // Use the Firestore document ID of the found document
+        .object(&updates) // Pass the updates object
+        .execute::<User>() // Specify that we're updating a `User`
+        .await
+        .map_err(MyError::FirestoreError)?; // Map FirestoreError to MyError
+
+
+    Ok(())
+}
 
     // Delete a user by ID
     pub async fn delete_by_id(&self, id: String) -> Result<(), FirestoreError> {

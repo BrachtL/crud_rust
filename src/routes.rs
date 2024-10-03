@@ -5,6 +5,8 @@ use crate::db_service::DbService;
 use log::info;
 use serde_json::{json, Map, Value};
 use warp::reject::Reject;
+use warp::reply::Json;
+use std::convert::Infallible;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
 use warp::{reject, Filter, Rejection, Reply};
@@ -106,7 +108,18 @@ pub async fn handle_delete_user(
 ) -> Result<impl Reply, Rejection> {
     let db_service = db_service.lock().await;
 
-    match db_service.delete_by_id(id).await {
+    // Check if the user exists
+    let user_exists = db_service
+        .check_user_exists(id.clone()) // Use the user ID to check existence
+        .await
+        .map_err(|_| warp::reject::custom(UserNotFoundError))?; // Reject with custom error if not found
+
+    if !user_exists {
+        return Err(warp::reject::custom(UserNotFoundError)); // Return custom rejection if not found
+    }
+
+    // Proceed with deletion if user exists
+    match db_service.delete_by_id(id.clone()).await {
         Ok(_) => Ok(warp::reply::json(&json!({
             "status": "User deleted successfully"
         }))),
@@ -139,3 +152,23 @@ pub fn create_routes(db_service: Arc<Mutex<DbService>>) -> impl Filter<Extract =
 
     insert_user.or(update_user).or(delete_user) // Combine the filters
 }
+
+/* 
+async fn handle_rejection(err: Rejection) -> Result<Json, Infallible> {
+    if let Some(_) = err.find::<UserNotFoundError>() {
+        // Return a JSON response when UserNotFoundError is encountered
+        let json_error = json!({
+            "status": "error",
+            "message": "User not found"
+        });
+        return Ok(warp::reply::json(&json_error));
+    }
+
+    // Fallback for any other rejections (e.g., unhandled errors)
+    let json_error = json!({
+        "status": "error",
+        "message": "An unknown error occurred"
+    });
+    Ok(warp::reply::json(&json_error))
+}
+*/

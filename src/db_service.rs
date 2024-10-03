@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt};
 
 use firestore::{FirestoreDb, FirestoreDbOptions, errors::FirestoreError};
 use log::info;
@@ -11,6 +11,18 @@ pub enum MyError {
     FirestoreError(FirestoreError),
     UserNotFound(String),
 }
+
+impl fmt::Display for MyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MyError::FirestoreError(err) => write!(f, "Firestore error: {}", err),
+            MyError::UserNotFound(id) => write!(f, "User not found with id: {}", id),
+        }
+    }
+}
+
+// Optionally, you can also implement std::error::Error for MyError
+impl std::error::Error for MyError {}
 
 pub struct DbService {
     client: FirestoreDb,
@@ -84,6 +96,20 @@ impl DbService {
             .await?;
 
         Ok(())
+    }
+
+    pub async fn get_user_by_id(&self, id: String) -> Result<User, MyError> {
+        let user: Option<User> = self.client
+            .fluent()
+            .select()
+            .by_id_in("Users") // Query the document by its ID
+            .obj()
+            .one(&id)
+            .await
+            .map_err(MyError::FirestoreError)?; // Convert FirestoreError to MyError
+    
+        // Convert Option<User> to Result<User, FirestoreError>
+        user.ok_or_else(|| MyError::UserNotFound(id))
     }
 
     pub async fn check_user_exists(&self, user_id: String) -> Result<bool, MyError> {

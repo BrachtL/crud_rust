@@ -130,6 +130,25 @@ pub async fn handle_delete_user(
     }
 }
 
+pub async fn handle_get_all_users(
+    db_service: Arc<Mutex<DbService>>,
+) -> Result<impl warp::Reply, Rejection> {
+    let db_service = db_service.lock().await;
+
+    match db_service.get_all().await {
+        Ok(users) => {
+            Ok(warp::reply::json(&json!( {
+                "status": "Success",
+                "users": users
+            })))
+        }
+        Err(e) => Ok(warp::reply::json(&json!( {
+            "status": "Error fetching users",
+            "error": e.to_string()
+        }))),
+    }
+}
+
 // Function to create the routes
 pub fn create_routes(db_service: Arc<Mutex<DbService>>) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     let insert_user = warp::post()
@@ -150,7 +169,13 @@ pub fn create_routes(db_service: Arc<Mutex<DbService>>) -> impl Filter<Extract =
         .and(with_db_service(db_service.clone())) // Pass the DB service
         .and_then(handle_delete_user);
 
-    insert_user.or(update_user).or(delete_user) // Combine the filters
+    // New route for getting all users
+    let get_all_users = warp::get()
+        .and(warp::path("get_all_users"))
+        .and(with_db_service(db_service.clone())) // Pass the DB service
+        .and_then(handle_get_all_users);
+
+    insert_user.or(update_user).or(delete_user).or(get_all_users) // Combine the filters
 }
 
 /* 

@@ -4,6 +4,7 @@ use crate::{db_service::MyError, model::User};
 use crate::db_service::DbService;
 use log::info;
 use serde_json::{json, Map, Value};
+use uuid::Uuid;
 use warp::reject::Reject;
 use warp::reply::Json;
 use std::convert::Infallible;
@@ -29,11 +30,14 @@ fn with_db_service(
 
 // Handler for inserting a user and returning the generated ID to the client
 pub async fn handle_insert_user(
-    user: User,
+    mut new_user: Value,
     db_service: Arc<Mutex<DbService>>,
 ) -> Result<impl warp::Reply, Rejection> {
     let db_service = db_service.lock().await;
-
+    new_user["id"] = json!(Uuid::new_v4().to_string());
+    let user: User = serde_json::from_value(new_user)
+        .map_err(|_| warp::reject::custom(UserNotFoundError))?;
+    
     match db_service.insert(user).await {
         Ok(generated_id) => {
             // Send the generated ID back to the client
@@ -195,7 +199,7 @@ pub fn create_routes(db_service: Arc<Mutex<DbService>>) -> impl Filter<Extract =
         .and(with_db_service(db_service.clone())) // Pass the DB service
         .and_then(handle_get_all_users);
 
-    let get_user_by_id = warp::get()
+        let get_user_by_id = warp::get()
         .and(warp::path("user"))
         .and(warp::path::param()) // Extract the user ID from the path
         .and(with_db_service(db_service.clone())) // Pass the DB service

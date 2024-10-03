@@ -52,7 +52,7 @@ impl DbService {
 
     // Insert function that generates a Firestore ID and adds it to the user data
     pub async fn insert(&self, mut user: User) -> Result<String, FirestoreError> {
-        user.id = Uuid::new_v4().to_string();
+        //user.id = Uuid::new_v4().to_string();
         // Generate the document ID using Firestore's auto-generation feature
         let doc_ref = self.client
             .fluent()
